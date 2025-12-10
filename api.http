@@ -1,0 +1,13 @@
+### Teste de Rota (Verificar se está vivo)
+GET http://localhost:3000/
+
+### Criar Usuário
+POST http://localhost:3000/users
+Content-Type: application/json
+
+{
+  "name": "Melky Admin",
+  "email": "melky@teste.com",
+  "password": "123",
+  "avatarUrl": "https://github.com/melky.png"
+}
