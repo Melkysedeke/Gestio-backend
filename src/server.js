@@ -1,8 +1,9 @@
-// src/server.js
 const app = require('./app');
+const env = require('./config/env'); // Importa suas configurações
 
-const PORT = 3000;
+// Usa a porta do .env ou 3000 se falhar
+const PORT = env.app.port || 3000;
 
 app.listen(PORT, () => {
-  console.log(`Servidor rodando na porta ${PORT}`);
+  console.log(`🚀 Servidor rodando em: ${env.app.url}`);
 });

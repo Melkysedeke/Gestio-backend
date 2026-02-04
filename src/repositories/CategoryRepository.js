@@ -1,4 +1,4 @@
-const db = require('../config/db');
+const db = require('../database/index');
 const Category = require('../models/CategoryModel');
 
 class CategoryRepository {

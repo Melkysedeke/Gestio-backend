@@ -3,14 +3,15 @@ class User {
     this.id = data.id;
     this.name = data.name;
     this.email = data.email;
-    this.passwordHash = data.password_hash;
-    this.avatarUrl = data.avatar_url;
+    this.password = data.password;
+    this.avatar = data.avatar;
+    this.settings = data.settings || {}; 
     this.createdAt = data.created_at;
     this.updatedAt = data.updated_at;
   }
 
   toSafeJSON() {
-    const { passwordHash, ...safeData } = this;
+    const { password, ...safeData } = this;
     return safeData;
   }
 }

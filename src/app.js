@@ -1,15 +1,31 @@
-// src/app.js
 const express = require('express');
-// Importar suas rotas
-const userRoutes = require('./routes/UserRoutes');
-// const walletRoutes = require('./routes/wallet.routes'); (Descomente quando fizer)
+const path = require('path');
+const cors = require('cors'); 
+const routes = require('./routes/index');
 
-const app = express();
+class App {
+  constructor() {
+    this.server = express();
+    this.server.use(cors({
+      origin: '*',
+      methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
+      allowedHeaders: ['Content-Type', 'Authorization']
+    }));
+    this.server.use(express.json({ limit: '50mb' }));
+    this.server.use(express.urlencoded({ limit: '50mb', extended: true }));
 
-app.use(express.json()); // Importante para ler JSON
+    this.middlewares();
+    this.routes();
+  }
 
-// Definir as rotas bases
-app.use('/users', userRoutes); 
-// app.use('/wallets', walletRoutes);
+  middlewares() {
+    const uploadsPath = path.resolve(__dirname, '..', 'uploads');
+    this.server.use('/uploads', express.static(uploadsPath));
+  }
 
-module.exports = app;
+  routes() {
+    this.server.use(routes);
+  }
+}
+
+module.exports = new App().server;

@@ -1,10 +1,20 @@
-// src/routes/user.routes.js
+// userRoutes.js
 const { Router } = require('express');
-const userController = require('../controllers/UserController');
+const UserController = require('../controllers/UserController');
+const authMiddleware = require('../middlewares/authMiddleware');
 
-const router = Router();
+const userRoutes = Router();
 
-// POST http://localhost:3000/users
-router.post('/', userController.create);
+// Públicas
+userRoutes.post('/signup', UserController.create);
+userRoutes.post('/signin', UserController.login);
 
-module.exports = router;
+// Privadas (Perfil e Configurações)
+userRoutes.get('/me', authMiddleware, UserController.show); // Autenticação
+userRoutes.put('/profile', authMiddleware, UserController.updateProfile); // Nome, Email
+userRoutes.patch('/avatar', authMiddleware, UserController.updateAvatar); // Imagem
+userRoutes.put('/settings', authMiddleware, UserController.updateSettings); // Tema, Preferências
+userRoutes.put('/update-password', authMiddleware, UserController.updatePassword); // Senha
+userRoutes.delete('/profile', authMiddleware, UserController.deleteAccount); // Deletar
+
+module.exports = userRoutes;
