@@ -1,15 +1,18 @@
 const walletRepository = require('../repositories/WalletRepository');
-// Certifique-se de importar o db caso vá usar a query direta no service
 const db = require('../database/index'); 
 
 class WalletService {
-  async createWallet(userId, { name, balance, color }) {
-    if (!name) throw new Error('Nome da carteira é obrigatório.');
-    
-    const finalColor = color || '#1773cf'; 
-    const initialBalance = balance || 0;
-
-    return await walletRepository.create({ userId, name, balance: initialBalance, color: finalColor });
+  async create({ userId, name, balance, color }) {
+    // 1. Validação simples
+    if (!userId) throw new Error("Usuário não identificado.");
+    // 2. Chamada ao repositório garantindo os nomes das colunas
+    const newWallet = await walletRepository.create({
+      userId: userId,
+      name,
+      balance: balance || 0,
+      color
+    });
+    return newWallet;
   }
 
   async listWallets(userId) {

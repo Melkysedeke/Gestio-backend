@@ -6,7 +6,7 @@ const walletRoutes = require('./walletRoutes');
 const transactionRoutes = require('./transactionRoutes');
 const categoryRoutes = require('./categoryRoutes');
 const goalRoutes = require('./goalRoutes');
-const debtRoutes = require('./debtRoutes'); // Unificamos Debts e Loans aqui
+const debtRoutes = require('./debtRoutes');
 
 const routes = Router();
 

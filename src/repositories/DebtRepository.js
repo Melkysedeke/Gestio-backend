@@ -1,99 +1,159 @@
 const db = require('../database/index');
 
-class DebtLoanRepository {
-  
-  // table = 'debts' ou 'loans'
-  async create(table, { walletId, title, name, amount, dueDate }) {
-    const client = await db.connect();
-    try {
-      // nameField: 'creditor_name' (Dívida) ou 'debtor_name' (Empréstimo)
-      const nameField = table === 'debts' ? 'creditor_name' : 'debtor_name';
-      
-      const result = await client.query(
-        `INSERT INTO ${table} (wallet_id, title, ${nameField}, amount, due_date, is_paid)
-         VALUES ($1, $2, $3, $4, $5, false)
-         RETURNING *`,
-        [walletId, title, name, amount, dueDate]
-      );
-      return result.rows[0];
-    } finally {
-      client.release();
-    }
-  }
+class DebtRepository {
 
-  async findAll(table, walletId) {
+  async findAll(walletId) {
     const result = await db.query(
-      `SELECT * FROM ${table} WHERE wallet_id = $1 ORDER BY due_date ASC`,
+      'SELECT * FROM debts WHERE wallet_id = $1 ORDER BY due_date ASC',
       [walletId]
     );
     return result.rows;
   }
 
-  async delete(table, id) {
-    await db.query(`DELETE FROM ${table} WHERE id = $1`, [id]);
+  async findById(id) {
+    const result = await db.query('SELECT * FROM debts WHERE id = $1', [id]);
+    return result.rows[0];
   }
 
-  async togglePaid(table, id) {
+  async create({ walletId, type, title, entityName, amount, dueDate }) {
+    const result = await db.query(
+      `INSERT INTO debts (wallet_id, type, title, entity_name, amount, due_date)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       RETURNING *`,
+      [walletId, type, title, entityName, amount, dueDate]
+    );
+    return result.rows[0];
+  }
+
+  // Lógica complexa de pagamento parcial
+  async addPayment(id, paymentAmount) {
     const client = await db.connect();
     try {
       await client.query('BEGIN');
 
-      // 1. Busca o item (Dívida ou Empréstimo)
-      const res = await client.query(`SELECT * FROM ${table} WHERE id = $1`, [id]);
-      const item = res.rows[0];
-      if (!item) throw new Error('Item not found');
+      // 1. Busca a dívida
+      const debtRes = await client.query('SELECT * FROM debts WHERE id = $1', [id]);
+      const debt = debtRes.rows[0];
+      if (!debt) throw new Error('Dívida não encontrada');
 
-      // 2. Define o novo status
-      const newStatus = !item.is_paid;
+      // 2. Busca Categoria (Dívida ou Empréstimo) para vincular corretamente
+      const categoryName = debt.type === 'payable' ? 'Dívida' : 'Empréstimo';
+      
+      const catRes = await client.query(
+        "SELECT id FROM categories WHERE name = $1 LIMIT 1", 
+        [categoryName] 
+      );
+      
+      const categoryId = catRes.rows.length > 0 ? catRes.rows[0].id : null;
 
-      // 3. Atualiza o saldo da carteira
-      let amountChange = 0;
-      let transactionType = '';
-      let categoryId = 8; // ID 8 = Outros (ou crie categorias "Dívidas"/"Empréstimos")
-      let description = '';
+      // 3. Cálculos de valores
+      const amountToPay = parseFloat(paymentAmount);
+      const newTotalPaid = parseFloat(debt.total_paid || 0) + amountToPay;
+      
+      // Considera pago se faltar menos de 1 centavo (margem de erro flutuante)
+      const isNowPaid = newTotalPaid >= (parseFloat(debt.amount) - 0.01);
 
-      if (table === 'debts') {
-        // Pagar dívida = Saída de dinheiro
-        amountChange = newStatus ? -item.amount : item.amount;
-        transactionType = 'expense';
-        description = `Pagamento: ${item.title}`;
-        // Se tiver categoria de Dívida (ex: id 5 ou outra), pode setar aqui
-      } else {
-        // Receber empréstimo = Entrada de dinheiro
-        amountChange = newStatus ? item.amount : -item.amount;
-        transactionType = 'income';
-        description = `Recebimento: ${item.title}`;
-        categoryId = 13; // Outros/Entradas
-      }
-
-      // Atualiza Saldo
+      // 4. Atualiza a tabela de Dívidas
       await client.query(
-        `UPDATE wallets SET balance = balance + $1 WHERE id = $2`,
-        [amountChange, item.wallet_id]
+        `UPDATE debts SET total_paid = $1, is_paid = $2, paid_at = $3, updated_at = NOW() WHERE id = $4`,
+        [newTotalPaid, isNowPaid, isNowPaid ? new Date() : debt.paid_at, id]
       );
 
-      // 4. Se virou PAGO, CRIA O REGISTRO NA TRANSAÇÃO PARA FICAR NO EXTRATO
-      if (newStatus === true) {
-        await client.query(
-          `INSERT INTO transactions (wallet_id, description, amount, type, category_id, date)
-           VALUES ($1, $2, $3, $4, $5, NOW())`,
-          [item.wallet_id, description, item.amount, transactionType, categoryId]
-        );
-      } else {
-        // (Opcional) Se desmarcou (estorno), poderia criar uma transação de estorno ou apagar a anterior.
-        // Por simplicidade neste MVP, apenas ajustamos o saldo (passo 3) sem criar transação de estorno,
-        // ou você pode criar uma transação inversa aqui se quiser.
-      }
+      // 5. Atualiza o Saldo da Carteira
+      const updateBalance = debt.type === 'payable'
+        ? 'UPDATE wallets SET balance = balance - $1 WHERE id = $2'
+        : 'UPDATE wallets SET balance = balance + $1 WHERE id = $2';
+      
+      await client.query(updateBalance, [amountToPay, debt.wallet_id]);
 
-      // 5. Atualiza o status na tabela de origem (debts/loans)
-      const updateRes = await client.query(
-        `UPDATE ${table} SET is_paid = $1 WHERE id = $2 RETURNING *`,
-        [newStatus, id]
+      // 6. Cria Transação no Extrato
+      // --- ALTERAÇÃO AQUI: Usamos apenas o título original, sem prefixos ---
+      const transactionDesc = debt.title; 
+      const transactionType = debt.type === 'payable' ? 'expense' : 'income';
+      
+      await client.query(
+        `INSERT INTO transactions (wallet_id, category_id, description, amount, type, transaction_date)
+         VALUES ($1, $2, $3, $4, $5, NOW())`,
+        [debt.wallet_id, categoryId, transactionDesc, amountToPay, transactionType]
       );
 
       await client.query('COMMIT');
-      return updateRes.rows[0];
+      return { message: 'Abatimento registrado!', isNowPaid, newTotalPaid };
 
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async update(id, { title, entity_name, amount, due_date }) {
+    const client = await db.connect();
+    try {
+      await client.query('BEGIN');
+
+      const oldDebtRes = await client.query('SELECT * FROM debts WHERE id = $1', [id]);
+      const oldDebt = oldDebtRes.rows[0];
+      if (!oldDebt) throw new Error('Dívida não encontrada');
+
+      // Atualiza Dívida
+      await client.query(
+        `UPDATE debts SET title = $1, entity_name = $2, amount = $3, due_date = $4, updated_at = NOW() WHERE id = $5`,
+        [title, entity_name, amount, due_date, id]
+      );
+
+      // Se mudou o título, atualiza as transações vinculadas (Opcional, mas estava no seu código original)
+      if (oldDebt.title !== title) {
+        const oldDesc = oldDebt.type === 'payable' ? `Pgto Dívida: ${oldDebt.title}` : `Receb. Empréstimo: ${oldDebt.title}`;
+        const newDesc = oldDebt.type === 'payable' ? `Pgto Dívida: ${title}` : `Receb. Empréstimo: ${title}`;
+        
+        // Usando LIKE para pegar variações ou match exato
+        await client.query(
+          `UPDATE transactions SET description = $1 WHERE description = $2`,
+          [newDesc, oldDesc]
+        );
+      }
+
+      await client.query('COMMIT');
+      return { message: 'Atualizado com sucesso' };
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async delete(id) {
+    const client = await db.connect();
+    try {
+      await client.query('BEGIN');
+
+      const debtRes = await client.query('SELECT * FROM debts WHERE id = $1', [id]);
+      const debt = debtRes.rows[0];
+      if (!debt) throw new Error('Dívida não encontrada');
+
+      // Se já foi paga (total ou parcial), precisamos estornar o dinheiro para a carteira
+      if (debt.total_paid > 0) {
+        const rollbackBalanceQuery = debt.type === 'payable'
+          ? 'UPDATE wallets SET balance = balance + $1 WHERE id = $2' // Devolve dinheiro
+          : 'UPDATE wallets SET balance = balance - $1 WHERE id = $2'; // Retira dinheiro
+        
+        await client.query(rollbackBalanceQuery, [debt.total_paid, debt.wallet_id]);
+
+        // Remove transações vinculadas a esta dívida pelo nome padrão
+        // Atenção: Isso apaga o histórico de pagamentos dessa dívida
+        const searchDesc = debt.type === 'payable' ? `Pgto Dívida: ${debt.title}` : `Receb. Empréstimo: ${debt.title}`;
+        await client.query(
+          "DELETE FROM transactions WHERE wallet_id = $1 AND description = $2",
+          [debt.wallet_id, searchDesc]
+        );
+      }
+
+      await client.query('DELETE FROM debts WHERE id = $1', [id]);
+
+      await client.query('COMMIT');
     } catch (error) {
       await client.query('ROLLBACK');
       throw error;
@@ -103,4 +163,4 @@ class DebtLoanRepository {
   }
 }
 
-module.exports = new DebtLoanRepository();
+module.exports = new DebtRepository();

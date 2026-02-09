@@ -1,25 +1,23 @@
-const jwt = require('jsonwebtoken');
+const { verify } = require('jsonwebtoken');
 const env = require('../config/env');
 
-module.exports = (req, res, next) => {
+function AuthMiddleware(req, res, next) {
   const authHeader = req.headers.authorization;
 
   if (!authHeader) {
-    return res.status(401).json({ error: 'Token não fornecido' });
+    return res.status(401).json({ error: 'Token não enviado' });
   }
-
-  // O header vem assim: "Bearer eyJhbGciOiJIUzI1..."
-  // Dividimos para pegar só a parte do token
   const [, token] = authHeader.split(' ');
-
   try {
-    const decoded = jwt.verify(token, env.auth.secret);
-
-    // Injeta o ID do usuário na requisição para o Controller usar
-    req.userId = decoded.id;
-
+    const decoded = verify(token, env.auth.secret);
+    const { sub } = decoded;
+    req.user = {
+      id: Number(sub) 
+    };
     return next();
   } catch (err) {
     return res.status(401).json({ error: 'Token inválido' });
   }
-};
+}
+
+module.exports = AuthMiddleware;

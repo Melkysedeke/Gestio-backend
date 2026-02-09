@@ -1,10 +1,16 @@
 const { Router } = require('express');
-const goalController = require('../controllers/GoalController');
+const GoalController = require('../controllers/GoalController');
+const authMiddleware = require('../middlewares/AuthMiddleware');
 
-const router = Router();
+const GoalRoutes = Router();
 
-router.post('/', goalController.create);
-router.get('/:userId', goalController.list);
-router.patch('/:id/progress', goalController.updateProgress);
+GoalRoutes.use(authMiddleware);
 
-module.exports = router;
+GoalRoutes.get('/', GoalController.index);
+GoalRoutes.post('/', GoalController.store);
+GoalRoutes.put('/:id', GoalController.update);
+GoalRoutes.patch('/:id/deposit', GoalController.deposit);  // Rota para guardar dinheiro
+GoalRoutes.patch('/:id/withdraw', GoalController.withdraw); // Rota para resgatar dinheiro
+GoalRoutes.delete('/:id', GoalController.delete);
+
+module.exports = GoalRoutes;

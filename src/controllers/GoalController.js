@@ -1,32 +1,69 @@
 const goalService = require('../services/GoalService');
 
 class GoalController {
-  async create(req, res) {
+  index = async (req, res) => {
     try {
-      const goal = await goalService.createGoal(req.body);
-      return res.status(201).json(goal);
-    } catch (error) {
-      return res.status(400).json({ error: error.message });
-    }
-  }
-
-  async list(req, res) {
-    try {
-      const { userId } = req.params;
-      const goals = await goalService.listGoals(userId);
+      const { wallet_id } = req.query;
+      const goals = await goalService.list(wallet_id);
       return res.json(goals);
     } catch (error) {
       return res.status(400).json({ error: error.message });
     }
   }
 
-  // Atualizar progresso (Depositar na meta)
-  async updateProgress(req, res) {
+  store = async (req, res) => {
+    try {
+      const goal = await goalService.create(req.body);
+      return res.status(201).json(goal);
+    } catch (error) {
+      return res.status(400).json({ error: error.message });
+    }
+  }
+
+  update = async (req, res) => {
     try {
       const { id } = req.params;
-      const { currentAmount } = req.body;
-      const goal = await goalService.addMoney(id, currentAmount);
-      return res.json(goal);
+      const { name, target_amount, deadline, color } = req.body;
+      const updatedGoal = await require('../repositories/GoalRepository').update(id, {
+        name, 
+        targetAmount: target_amount, 
+        deadline, 
+        color
+      });
+      
+      return res.json(updatedGoal);
+    } catch (error) {
+      return res.status(400).json({ error: error.message });
+    }
+  }
+
+  deposit = async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { amount } = req.body;
+      const result = await goalService.deposit(id, amount);
+      return res.json(result);
+    } catch (error) {
+      return res.status(400).json({ error: error.message });
+    }
+  }
+
+  withdraw = async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { amount } = req.body;
+      const result = await goalService.withdraw(id, amount);
+      return res.json(result);
+    } catch (error) {
+      return res.status(400).json({ error: error.message });
+    }
+  }
+
+  delete = async (req, res) => {
+    try {
+      const { id } = req.params;
+      await goalService.delete(id);
+      return res.status(204).send();
     } catch (error) {
       return res.status(400).json({ error: error.message });
     }

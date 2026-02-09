@@ -1,36 +1,40 @@
 const transactionRepository = require('../repositories/TransactionRepository');
-const walletRepository = require('../repositories/WalletRepository');
+const walletRepository = require('../repositories/WalletRepository'); 
+// Se precisar validar se a carteira pertence ao user, importe o walletRepo
 
 class TransactionService {
 
-  async createTransaction(data) {
-    const { walletId, type, amount } = data;
-
-    // 1. Verifica se a carteira existe
-    const wallet = await walletRepository.findById(walletId);
-    if (!wallet) throw new Error('Carteira não encontrada.');
-
-    // 2. Cria a transação
-    const transaction = await transactionRepository.create(data);
-
-    // 3. REGRA DE NEGÓCIO: Atualiza o saldo da carteira
-    // Se for despesa, subtrai. Se for receita, soma.
-    let newBalance = Number(wallet.currentBalance);
-    
-    if (type === 'expense') {
-        newBalance -= amount;
-    } else {
-        newBalance += amount;
-    }
-
-    // Atualiza no banco
-    await walletRepository.updateBalance(walletId, newBalance);
-
-    return transaction;
+  async list({ userId, walletId, startDate, endDate }) {
+    // Aqui você poderia adicionar validação se a carteira pertence ao usuário
+    return await transactionRepository.findAll({ userId, walletId, startDate, endDate });
   }
 
-  async getExtract(walletId) {
-    return await transactionRepository.findAllByWalletId(walletId);
+  async create({ walletId, categoryId, type, amount, description, transactionDate }) {
+    // 1. Validações básicas
+    if (!walletId || !amount || !type) {
+      throw new Error("Dados obrigatórios faltando.");
+    }
+
+    // 2. Chama o repositório para criar a transação e atualizar saldo
+    // (O Repositório já cuida do BEGIN/COMMIT)
+    return await transactionRepository.create({
+      walletId, 
+      categoryId, 
+      type, 
+      amount, 
+      description, 
+      transactionDate: transactionDate || new Date()
+    });
+  }
+
+  async update(userId, transactionId, data) {
+    // Opcional: Verificar se a transação pertence ao user antes de atualizar
+    return await transactionRepository.update(transactionId, data);
+  }
+
+  async delete(userId, transactionId) {
+    // Opcional: Verificar se a transação pertence ao user antes de deletar
+    return await transactionRepository.delete(transactionId);
   }
 }
 

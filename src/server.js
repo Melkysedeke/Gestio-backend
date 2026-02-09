@@ -1,9 +1,11 @@
 const app = require('./app');
-const env = require('./config/env'); // Importa suas configurações
+require('dotenv').config();
 
-// Usa a porta do .env ou 3000 se falhar
-const PORT = env.app.port || 3000;
+const PORT = process.env.PORT || 3000;
+const HOST = '0.0.0.0'; 
 
-app.listen(PORT, () => {
-  console.log(`🚀 Servidor rodando em: ${env.app.url}`);
+app.listen(PORT, HOST, () => {
+  console.log(`🔥 Server running on port ${PORT}`);
+  console.log(`📱 Local Access: http://localhost:${PORT}`);
+  console.log(`🌐 Network Access: http://192.168.0.114:${PORT}`); 
 });

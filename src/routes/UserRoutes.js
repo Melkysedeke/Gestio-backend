@@ -1,20 +1,25 @@
-// userRoutes.js
 const { Router } = require('express');
 const UserController = require('../controllers/UserController');
-const authMiddleware = require('../middlewares/authMiddleware');
+const AuthController = require('../controllers/AuthController');
+const AuthMiddleware = require('../middlewares/AuthMiddleware');
+const multer = require('multer');
+
+const uploadConfig = require('../config/multer');
+const upload = multer(uploadConfig);
 
 const userRoutes = Router();
 
-// Públicas
-userRoutes.post('/signup', UserController.create);
-userRoutes.post('/signin', UserController.login);
+userRoutes.post('/signup', upload.single('avatar'), UserController.store);
+userRoutes.post('/signin', AuthController.signin);
 
-// Privadas (Perfil e Configurações)
-userRoutes.get('/me', authMiddleware, UserController.show); // Autenticação
-userRoutes.put('/profile', authMiddleware, UserController.updateProfile); // Nome, Email
-userRoutes.patch('/avatar', authMiddleware, UserController.updateAvatar); // Imagem
-userRoutes.put('/settings', authMiddleware, UserController.updateSettings); // Tema, Preferências
-userRoutes.put('/update-password', authMiddleware, UserController.updatePassword); // Senha
-userRoutes.delete('/profile', authMiddleware, UserController.deleteAccount); // Deletar
+userRoutes.use(AuthMiddleware);
+
+userRoutes.patch('/avatar', UserController.updateAvatar);
+userRoutes.put('/profile', UserController.updateProfile);
+userRoutes.put('/password', UserController.updatePassword);
+userRoutes.delete('/delete', UserController.deleteUser);
+
+userRoutes.patch('/settings', UserController.updateSettings);
+
 
 module.exports = userRoutes;

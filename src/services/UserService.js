@@ -1,57 +1,84 @@
+// src/services/UserService.js
 const userRepository = require('../repositories/UserRepository');
+const fs = require('fs');
+const path = require('path');
+const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
-const jwt = require('jsonwebtoken');
-const env = require('../config/env'); // Importa o segredo do JWT
 
 class UserService {
-  
   async register({ name, email, password, avatar }) {
-    // 1. Verifica se usuário já existe
     const userExists = await userRepository.findByEmail(email);
     if (userExists) {
-      throw new Error('User already exists');
+      throw new Error('Usuário já existe!');
     }
-
-    // 2. Criptografa a senha
-    const salt = await bcrypt.genSalt(10);
-    const passwordHash = await bcrypt.hash(password, salt);
-
-    // 3. Cria o usuário no banco
-    const user = await userRepository.create({ name, email, passwordHash, avatar });
-
-    // 4. Gera o Token
-    const token = jwt.sign({ id: user.id }, env.auth.secret, { expiresIn: env.auth.expiresIn });
-
-    return { user, token };
+    const passwordHash = await bcrypt.hash(password, 8);
+    const user = await userRepository.create({
+      name,
+      email,
+      password: passwordHash,
+      avatar,
+    });
+    return user;
   }
 
-  async login(email, password) {
-    // 1. Busca usuário
-    const user = await userRepository.findByEmail(email);
+  async updateAvatar({ userId, base64, fileExtension }) {
+    const user = await userRepository.findById(userId);
     if (!user) {
-      throw new Error('User not found'); // Mensagem genérica por segurança
+      throw new Error('Usuário não encontrado.');
     }
-
-    // 2. Compara senha
-    const isMatch = await bcrypt.compare(password, user.password);
-    if (!isMatch) {
-      throw new Error('Invalid password');
+    if (user.avatar) {
+      const oldAvatarPath = path.resolve(__dirname, '..', '..', 'uploads', user.avatar);
+      if (fs.existsSync(oldAvatarPath)) {
+        await fs.promises.unlink(oldAvatarPath);
+      }
     }
-
-    // 3. Gera Token
-    const token = jwt.sign({ id: user.id }, env.auth.secret, { expiresIn: env.auth.expiresIn });
-
-    return { user, token };
+    const fileName = `${crypto.randomBytes(10).toString('hex')}-${userId}.${fileExtension || 'jpg'}`;
+    const uploadPath = path.resolve(__dirname, '..', '..', 'uploads', fileName);
+    const buffer = Buffer.from(base64, 'base64');
+    await fs.promises.writeFile(uploadPath, buffer);
+    const updatedUser = await userRepository.updateAvatar(userId, fileName);
+    return updatedUser;
   }
 
-  async updateUserSettings(userId, { lastOpenedWalletId, theme }) {
-    // Prepara o objeto apenas com o que foi enviado
-    const settingsToUpdate = {};
-    if (lastOpenedWalletId !== undefined) settingsToUpdate.last_opened_wallet = lastOpenedWalletId;
-    if (theme !== undefined) settingsToUpdate.theme = theme;
+  async updateProfile({ userId, name, email }) {
+    const user = await userRepository.findById(userId);
+    if (!user) {
+      throw new Error('Usuário não encontrado.');
+    }
+    if (name === user.name && email === user.email) {
+      throw new Error('Não houve alteração nos dados.');
+    }
+    if (email !== user.email) {
+      const userWithUpdatedEmail = await userRepository.findByEmail(email);
+      if (userWithUpdatedEmail && userWithUpdatedEmail.id !== userId) {
+        throw new Error('Este e-mail já está em uso por outro usuário.');
+      }
+    }
+    const updatedUser = await userRepository.updateProfile(userId, { name, email });
+    return updatedUser;
+  }
 
-    if (Object.keys(settingsToUpdate).length > 0) {
-      await userRepository.updateSettings(userId, settingsToUpdate);
+  async updatePassword({ userId, oldPassword, newPassword }) {
+    const user = await userRepository.findById(userId);
+    if (!user) throw new Error('Usuário não encontrado.');
+    const passwordMatched = await bcrypt.compare(oldPassword, user.password);
+    if (!passwordMatched) {
+      throw new Error('A senha atual está incorreta.');
+    }
+    if (oldPassword === newPassword) {
+      throw new Error('A nova senha deve ser diferente da atual.');
+    }
+    const hashedNewPassword = await bcrypt.hash(newPassword, 8);
+    await userRepository.updatePassword(userId, hashedNewPassword);
+  }
+
+  async deleteUser(userId) {
+    const user = await userRepository.deleteUser(userId);
+    if (user && user.avatar) {
+      const filePath = path.resolve(__dirname, '..', '..', 'uploads', user.avatar);
+      if (fs.existsSync(filePath)) {
+        await fs.promises.unlink(filePath);
+      }
     }
   }
 }

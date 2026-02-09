@@ -27,6 +27,6 @@ module.exports = {
   },
   auth: {
     secret: process.env.JWT_SECRET || 'fallback_secret',
-    expiresIn: '30d',
+    expiresIn: '7d',
   },
 };

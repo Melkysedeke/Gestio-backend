@@ -1,10 +1,11 @@
 const { Router } = require('express');
 const TransactionController = require('../controllers/TransactionController');
-const authMiddleware = require('../middlewares/authMiddleware');
+const AuthMiddleware = require('../middlewares/AuthMiddleware');
 
 const transactionRoutes = Router();
 
-transactionRoutes.use(authMiddleware); // Autenticação
+transactionRoutes.use(AuthMiddleware); // Autenticação
+
 transactionRoutes.post('/', TransactionController.create); // Nova Transação
 transactionRoutes.get('/', TransactionController.index); // Filtro
 transactionRoutes.put('/:id', TransactionController.update);
