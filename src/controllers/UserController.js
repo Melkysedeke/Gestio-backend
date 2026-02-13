@@ -95,13 +95,8 @@ class UserController {
 
   updateSettings = async (req, res) => {
     try {
-      // 1. Pega o ID do usuário (confirme se seu middleware usa req.user.id ou req.user_id)
-      // Geralmente em JWT simples é req.user_id, mas se seu middleware popula req.user, mantenha req.user.id
       const userId = req.user?.id || req.user_id; 
-      // 2. Pega TUDO o que vier no corpo (theme, notifications, last_opened_wallet...)
-      // Isso permite que o Front mande { "theme": "dark" } ou { "last_opened_wallet": 5 }
       const newSettings = req.body;
-      // Validação básica: se o body estiver vazio, não faz nada
       if (Object.keys(newSettings).length === 0) {
         return res.status(400).json({ error: 'Nenhuma configuração enviada.' });
       }

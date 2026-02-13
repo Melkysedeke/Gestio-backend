@@ -2,9 +2,9 @@
 -- GESTIO - SETUP SCRIPT (RESET & CREATE)
 -- ==========================================================
 
+DROP TABLE IF EXISTS transactions CASCADE;
 DROP TABLE IF EXISTS goals CASCADE;
 DROP TABLE IF EXISTS debts CASCADE;
-DROP TABLE IF EXISTS transactions CASCADE;
 DROP TABLE IF EXISTS categories CASCADE;
 DROP TABLE IF EXISTS wallets CASCADE;
 DROP TABLE IF EXISTS users CASCADE;
@@ -18,7 +18,7 @@ CREATE TABLE users (
     email VARCHAR(120) UNIQUE NOT NULL, 
     password TEXT, 
     avatar TEXT, 
-    settings JSONB DEFAULT '{}'::jsonb,
+    settings JSONB DEFAULT '{"theme": "light", "notifications": false, "last_opened_wallet": null}'::jsonb,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -45,33 +45,14 @@ CREATE TABLE categories (
     user_id INT REFERENCES users(id) ON DELETE CASCADE, 
     name VARCHAR(50) NOT NULL,
     icon VARCHAR(50) NOT NULL,
-    type VARCHAR(20) NOT NULL CHECK (type IN ('income', 'expense')),
+    type VARCHAR(20) NOT NULL CHECK (type IN ('income', 'expense', 'debts', 'investment')),
     color VARCHAR(7) DEFAULT '#94a3b8',
     archived BOOLEAN DEFAULT FALSE,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 -- ==========================================================
--- 4. TRANSACTIONS
--- ==========================================================
-CREATE TABLE transactions (
-    id SERIAL PRIMARY KEY,
-    wallet_id INT NOT NULL REFERENCES wallets(id) ON DELETE CASCADE,
-    category_id INT REFERENCES categories(id) ON DELETE SET NULL,
-    type VARCHAR(20) NOT NULL CHECK (type IN ('income', 'expense')),
-    amount NUMERIC(12,2) NOT NULL CHECK (amount > 0),
-    description TEXT,
-    transaction_date TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW()
-);
-
--- Índices para Performance do Extrato
-CREATE INDEX idx_transactions_wallet_date ON transactions(wallet_id, transaction_date DESC);
-CREATE INDEX idx_transactions_category ON transactions(category_id);
-
--- ==========================================================
--- 5. DEBTS (Dívidas e Empréstimos)
+-- 4. DEBTS (Dívidas e Empréstimos) -- MOVIDO PARA CIMA
 -- ==========================================================
 CREATE TABLE debts (
     id SERIAL PRIMARY KEY,
@@ -80,6 +61,7 @@ CREATE TABLE debts (
     title VARCHAR(100) NOT NULL,
     entity_name VARCHAR(100),
     amount NUMERIC(12,2) NOT NULL CHECK (amount > 0),
+    total_paid NUMERIC(12,2) DEFAULT 0,
     due_date DATE NOT NULL,
     is_paid BOOLEAN DEFAULT FALSE,
     paid_at TIMESTAMPTZ, 
@@ -91,7 +73,7 @@ CREATE INDEX idx_debts_wallet_status ON debts(wallet_id, is_paid);
 CREATE INDEX idx_debts_due_date ON debts(due_date);
 
 -- ==========================================================
--- 6. GOALS (Objetivos)
+-- 5. GOALS (Objetivos) -- MOVIDO PARA CIMA
 -- ==========================================================
 CREATE TABLE goals (
     id SERIAL PRIMARY KEY,
@@ -105,6 +87,28 @@ CREATE TABLE goals (
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- ==========================================================
+-- 6. TRANSACTIONS -- MOVIDO PARA O FINAL (Pois depende de Debts e Goals)
+-- ==========================================================
+CREATE TABLE transactions (
+    id SERIAL PRIMARY KEY,
+    user_id INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    wallet_id INT NOT NULL REFERENCES wallets(id) ON DELETE CASCADE,
+    category_id INT REFERENCES categories(id) ON DELETE SET NULL,
+    debt_id INT REFERENCES debts(id) ON DELETE SET NULL, 
+    goal_id INT REFERENCES goals(id) ON DELETE SET NULL,
+    type VARCHAR(20) NOT NULL CHECK (type IN ('income', 'expense')),
+    amount NUMERIC(12,2) NOT NULL CHECK (amount > 0),
+    description TEXT,
+    transaction_date TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Índices para Performance do Extrato
+CREATE INDEX idx_transactions_wallet_date ON transactions(wallet_id, transaction_date DESC);
+CREATE INDEX idx_transactions_category ON transactions(category_id);
 
 -- ==========================================================
 -- 7. SEED DATA (Categorias Padrão)
@@ -124,4 +128,10 @@ INSERT INTO categories (name, icon, type, color, user_id) VALUES
 ('Freelance', 'computer', 'income', '#06b6d4', NULL),
 ('Investimento', 'trending-up', 'income', '#8b5cf6', NULL),
 ('Presente', 'card-giftcard', 'income', '#f43f5e', NULL),
-('Outros', 'more-horiz', 'income', '#64748b', NULL);
+('Outros', 'more-horiz', 'income', '#64748b', NULL),
+-- Dívidas
+('Dívida', 'receipt-long', 'debts', '#fa6238', NULL),
+('Empréstimo', 'handshake', 'debts', '#1773cf', NULL),
+-- Investimento
+('Investimento', 'trending-up', 'investment', '#1773cf', NULL),
+('Resgate', 'savings', 'investment', '#0bda5b', NULL);

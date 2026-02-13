@@ -1,4 +1,5 @@
 const transactionService = require('../services/TransactionService');
+const transactionRepository = require('../repositories/TransactionRepository');
 
 class TransactionController {
   
@@ -19,6 +20,21 @@ class TransactionController {
     } catch (error) {
       console.error("Erro ao listar transações:", error.message);
       return res.status(400).json({ error: error.message });
+    }
+  }
+
+  async show(req, res) {
+    try {
+      const { id } = req.params;
+      const transaction = await transactionRepository.findById(id);
+
+      if (!transaction) {
+        return res.status(404).json({ error: 'Transação não encontrada.' });
+      }
+
+      return res.json(transaction);
+    } catch (error) {
+      return res.status(400).json({ error: 'Erro ao buscar transação.' });
     }
   }
 

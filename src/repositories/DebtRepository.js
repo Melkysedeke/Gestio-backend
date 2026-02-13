@@ -25,7 +25,7 @@ class DebtRepository {
     return result.rows[0];
   }
 
-  // Lógica complexa de pagamento parcial
+  // --- PAGAMENTO PARCIAL (CORRIGIDO: INCLUI USER_ID) ---
   async addPayment(id, paymentAmount) {
     const client = await db.connect();
     try {
@@ -36,45 +36,50 @@ class DebtRepository {
       const debt = debtRes.rows[0];
       if (!debt) throw new Error('Dívida não encontrada');
 
-      // 2. Busca Categoria (Dívida ou Empréstimo) para vincular corretamente
-      const categoryName = debt.type === 'payable' ? 'Dívida' : 'Empréstimo';
+      // 2. Busca user_id da carteira (NECESSÁRIO PARA A TRANSAÇÃO)
+      const walletRes = await client.query('SELECT user_id FROM wallets WHERE id = $1', [debt.wallet_id]);
+      if (walletRes.rows.length === 0) throw new Error('Carteira não encontrada');
+      const userId = walletRes.rows[0].user_id;
+
+      // 3. Busca Categoria Técnica (Dívida ou Empréstimo)
+      const categoryType = 'debts'; 
+      const searchName = debt.type === 'payable' ? 'Dívida' : 'Empréstimo'; 
       
       const catRes = await client.query(
-        "SELECT id FROM categories WHERE name = $1 LIMIT 1", 
-        [categoryName] 
+        "SELECT id FROM categories WHERE type = $1 AND name ILIKE $2 LIMIT 1", 
+        [categoryType, `%${searchName}%`] 
       );
       
       const categoryId = catRes.rows.length > 0 ? catRes.rows[0].id : null;
 
-      // 3. Cálculos de valores
+      // 4. Cálculos de valores
       const amountToPay = parseFloat(paymentAmount);
       const newTotalPaid = parseFloat(debt.total_paid || 0) + amountToPay;
       
-      // Considera pago se faltar menos de 1 centavo (margem de erro flutuante)
+      // Margem de erro flutuante (0.01)
       const isNowPaid = newTotalPaid >= (parseFloat(debt.amount) - 0.01);
 
-      // 4. Atualiza a tabela de Dívidas
+      // 5. Atualiza a tabela de Dívidas
       await client.query(
         `UPDATE debts SET total_paid = $1, is_paid = $2, paid_at = $3, updated_at = NOW() WHERE id = $4`,
         [newTotalPaid, isNowPaid, isNowPaid ? new Date() : debt.paid_at, id]
       );
 
-      // 5. Atualiza o Saldo da Carteira
+      // 6. Atualiza o Saldo da Carteira
       const updateBalance = debt.type === 'payable'
         ? 'UPDATE wallets SET balance = balance - $1 WHERE id = $2'
         : 'UPDATE wallets SET balance = balance + $1 WHERE id = $2';
       
       await client.query(updateBalance, [amountToPay, debt.wallet_id]);
 
-      // 6. Cria Transação no Extrato
-      // --- ALTERAÇÃO AQUI: Usamos apenas o título original, sem prefixos ---
+      // 7. Cria Transação no Extrato (COM USER_ID e DEBT_ID)
       const transactionDesc = debt.title; 
       const transactionType = debt.type === 'payable' ? 'expense' : 'income';
       
       await client.query(
-        `INSERT INTO transactions (wallet_id, category_id, description, amount, type, transaction_date)
-         VALUES ($1, $2, $3, $4, $5, NOW())`,
-        [debt.wallet_id, categoryId, transactionDesc, amountToPay, transactionType]
+        `INSERT INTO transactions (user_id, wallet_id, category_id, debt_id, description, amount, type, transaction_date)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())`,
+        [userId, debt.wallet_id, categoryId, debt.id, transactionDesc, amountToPay, transactionType]
       );
 
       await client.query('COMMIT');
@@ -88,6 +93,7 @@ class DebtRepository {
     }
   }
 
+  // --- ATUALIZAÇÃO ---
   async update(id, { title, entity_name, amount, due_date }) {
     const client = await db.connect();
     try {
@@ -97,21 +103,17 @@ class DebtRepository {
       const oldDebt = oldDebtRes.rows[0];
       if (!oldDebt) throw new Error('Dívida não encontrada');
 
-      // Atualiza Dívida
+      // Atualiza a Dívida
       await client.query(
         `UPDATE debts SET title = $1, entity_name = $2, amount = $3, due_date = $4, updated_at = NOW() WHERE id = $5`,
         [title, entity_name, amount, due_date, id]
       );
 
-      // Se mudou o título, atualiza as transações vinculadas (Opcional, mas estava no seu código original)
+      // Se mudou o título, atualiza as descrições das transações vinculadas
       if (oldDebt.title !== title) {
-        const oldDesc = oldDebt.type === 'payable' ? `Pgto Dívida: ${oldDebt.title}` : `Receb. Empréstimo: ${oldDebt.title}`;
-        const newDesc = oldDebt.type === 'payable' ? `Pgto Dívida: ${title}` : `Receb. Empréstimo: ${title}`;
-        
-        // Usando LIKE para pegar variações ou match exato
         await client.query(
-          `UPDATE transactions SET description = $1 WHERE description = $2`,
-          [newDesc, oldDesc]
+          `UPDATE transactions SET description = $1 WHERE debt_id = $2`,
+          [title, id]
         );
       }
 
@@ -125,6 +127,11 @@ class DebtRepository {
     }
   }
 
+  // --- EXCLUSÃO (CORRIGIDA: Estorno também precisa de USER_ID se for criar transação de estorno) ---
+  // Nota: No seu código original de delete, você estava DELETANDO as transações ("DELETE FROM transactions...").
+  // Se deletar, não precisa de user_id. Se fosse criar transação de estorno ("Reembolso"), precisaria.
+  // Vou manter a lógica de DELETAR o histórico para limpar a sujeira, mas estornar o saldo.
+
   async delete(id) {
     const client = await db.connect();
     try {
@@ -134,23 +141,22 @@ class DebtRepository {
       const debt = debtRes.rows[0];
       if (!debt) throw new Error('Dívida não encontrada');
 
-      // Se já foi paga (total ou parcial), precisamos estornar o dinheiro para a carteira
+      // 1. Estorno do valor pago (se houver) - Devolve o dinheiro pra carteira
       if (debt.total_paid > 0) {
         const rollbackBalanceQuery = debt.type === 'payable'
-          ? 'UPDATE wallets SET balance = balance + $1 WHERE id = $2' // Devolve dinheiro
-          : 'UPDATE wallets SET balance = balance - $1 WHERE id = $2'; // Retira dinheiro
+          ? 'UPDATE wallets SET balance = balance + $1 WHERE id = $2' 
+          : 'UPDATE wallets SET balance = balance - $1 WHERE id = $2'; 
         
         await client.query(rollbackBalanceQuery, [debt.total_paid, debt.wallet_id]);
 
-        // Remove transações vinculadas a esta dívida pelo nome padrão
-        // Atenção: Isso apaga o histórico de pagamentos dessa dívida
-        const searchDesc = debt.type === 'payable' ? `Pgto Dívida: ${debt.title}` : `Receb. Empréstimo: ${debt.title}`;
+        // 2. Remove transações vinculadas PELO ID (Limpa histórico)
         await client.query(
-          "DELETE FROM transactions WHERE wallet_id = $1 AND description = $2",
-          [debt.wallet_id, searchDesc]
+          "DELETE FROM transactions WHERE debt_id = $1",
+          [id]
         );
       }
 
+      // 3. Remove a dívida
       await client.query('DELETE FROM debts WHERE id = $1', [id]);
 
       await client.query('COMMIT');

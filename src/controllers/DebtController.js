@@ -27,13 +27,14 @@ class DebtController {
   update = async (req, res) => {
     try {
       const { id } = req.params;
-      const updatedGoal = await goalService.update(id, req.body);
+      const updatedDebt = await debtService.update(id, req.body);
       
-      return res.json(updatedGoal);
+      return res.json(updatedDebt);
     } catch (error) {
+      console.error("Erro update debt:", error);
       return res.status(400).json({ error: error.message });
     }
-  }
+}
 
   show = async (req, res) => {
     try {
