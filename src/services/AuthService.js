@@ -11,11 +11,11 @@ class AuthService {
   async compare({ email, password }) {
     // 1. Verificar se o usuário existe no banco de dados
     const user = await userRepository.findByEmail(email);
-    if (!user) {
+    if (!user || user.deleted_at !== null) {
       throw new Error('E-mail ou senha incorretos.');
     }
 
-    // 2. Comparar a senha enviada (plana) com a senha do banco (hash)
+    // 2. Comparar a senha
     const passwordMatched = await bcrypt.compare(password, user.password);
     if (!passwordMatched) {
       throw new Error('E-mail ou senha incorretos.');
@@ -28,7 +28,11 @@ class AuthService {
       expiresIn: expiresIn,
     });
     
-    const userSettings = user.settings || {};
+    // 🚀 Extrai configurações em formato de texto para achar a carteira
+    let parsedSettings = {};
+    if (user.settings) {
+      try { parsedSettings = JSON.parse(user.settings); } catch(e) {}
+    }
 
     // 4. Preparar o objeto de retorno
     const userWithoutPassword = {
@@ -36,7 +40,8 @@ class AuthService {
       name: user.name,
       email: user.email,
       avatar: user.avatar,
-      last_opened_wallet: userSettings.last_opened_wallet || null,
+      settings: user.settings, // Manda a string inteira pro WatermelonDB salvar
+      last_opened_wallet: parsedSettings.last_opened_wallet || null,
     };
 
     return {

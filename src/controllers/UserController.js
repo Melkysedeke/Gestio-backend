@@ -84,11 +84,19 @@ class UserController {
 }
 
   async deleteUser(req, res) {
+    console.log("🚀 O sinal de DELETE chegou no Controller!");
     try {
-      const userId = req.user.id;
-      await userService.deleteUser(userId);
+      const userId = req.user?.id; // Tente pegar com a interrogação para não dar erro se estiver nulo
+      console.log("🆔 ID extraído do Token:", userId);
+
+      if (!userId) {
+        return res.status(401).json({ error: "ID do usuário não encontrado no token." });
+      }
+
+      const result = await userService.deleteUser(userId);
       return res.status(204).send();
     } catch (error) {
+      console.error("❌ Erro no deleteUser do Controller:", error.message);
       return res.status(400).json({ error: "Erro ao excluir conta." });
     }
   }

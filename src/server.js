@@ -7,5 +7,4 @@ const HOST = '0.0.0.0';
 app.listen(PORT, HOST, () => {
   console.log(`🔥 Server running on port ${PORT}`);
   console.log(`📱 Local Access: http://localhost:${PORT}`);
-  console.log(`🌐 Network Access: http://192.168.0.114:${PORT}`); 
 });

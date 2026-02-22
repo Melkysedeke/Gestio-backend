@@ -1,4 +1,5 @@
-const db = require('../database/index'); // Seu arquivo de conexão pool
+const db = require('../database/index');
+const crypto = require('crypto'); // 🚀 Importado para gerar o ID em texto
 
 class UserRepository {
   async findByEmail(email) {
@@ -12,11 +13,20 @@ class UserRepository {
   }
 
   async create({ name, email, password, avatar }) {
+    const id = crypto.randomUUID(); // 🚀 1. Gera o ID universal (ex: a1b2c3-...)
+    
+    // 2. Cria as configurações padrão já em formato de Texto (String)
+    const defaultSettings = JSON.stringify({ 
+      theme: 'light', 
+      notifications: false, 
+      last_opened_wallet: null 
+    });
+
     const result = await db.query(
-      `INSERT INTO users (name, email, password, avatar)
-       VALUES ($1, $2, $3, $4)
-       RETURNING id, name, email, avatar`,
-      [name, email, password, avatar]
+      `INSERT INTO users (id, name, email, password, avatar, settings, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW())
+       RETURNING id, name, email, avatar, settings`,
+      [id, name, email, password, avatar, defaultSettings]
     );
     return result.rows[0];
   }
@@ -39,7 +49,6 @@ class UserRepository {
       WHERE id = $3 
       RETURNING id, name, email, avatar
     `;
-    
     const { rows } = await db.query(query, [name, email, userId]);
     return rows[0];
   }
@@ -50,21 +59,55 @@ class UserRepository {
   }
 
   async deleteUser(userId) {
-    const query = 'DELETE FROM users WHERE id = $1 RETURNING avatar';
-    const { rows } = await db.query(query, [userId]);
-    return rows[0]; 
+    try {
+      console.log("🔍 Tentando deletar o ID:", userId);
+
+      const query = `
+        UPDATE users 
+        SET deleted_at = NOW(), 
+            updated_at = NOW() 
+        WHERE id = $1 
+        RETURNING id, name, email, deleted_at
+      `;
+      
+      const { rows, rowCount } = await db.query(query, [userId]);
+      
+      if (rowCount === 0) {
+        console.log("⚠️ NENHUM usuário encontrado com esse ID no banco!");
+        return null;
+      }
+
+      console.log("✅ RESULTADO DO BANCO:", rows[0]);
+      return rows[0]; 
+    } catch (error) {
+      console.error("❌ ERRO NO SQL DO DELETE:", error.message);
+      throw error;
+    }
   }
 
   async updateSettings(userId, newSettings) {
+    // 🚀 4. MERGE MANUAL: Como é TEXTO no banco, buscamos, juntamos no JS e salvamos.
+    const { rows: currentRows } = await db.query('SELECT settings FROM users WHERE id = $1', [userId]);
+    
+    let currentSettings = {};
+    if (currentRows.length > 0 && currentRows[0].settings) {
+        try {
+            currentSettings = JSON.parse(currentRows[0].settings);
+        } catch (error) {
+            console.error("Erro ao fazer parse das settings antigas");
+        }
+    }
+
+    // Junta as configurações antigas com as novas
+    const mergedSettings = JSON.stringify({ ...currentSettings, ...newSettings });
+
     const query = `
       UPDATE users 
-      SET settings = COALESCE(settings, '{}'::jsonb) || $1::jsonb
+      SET settings = $1, updated_at = NOW()
       WHERE id = $2
       RETURNING id, name, email, settings
     `;
-    // O driver do Postgres (pg) já converte o objeto JS 'newSettings' para JSON automaticamente
-    const { rows } = await db.query(query, [newSettings, userId]);
-    
+    const { rows } = await db.query(query, [mergedSettings, userId]);
     return rows[0];
   }
 }
