@@ -44,8 +44,9 @@ class WalletService {
     const wallet = await walletRepository.findById(walletId);
     
     if (!wallet) throw new Error('Carteira não encontrada.');
-    // Verifique se o nome da coluna no seu banco é user_id ou userId
-    if (wallet.user_id !== userId && wallet.userId !== userId) {
+    
+    // UUIDs são strings, a comparação direta (!==) funciona perfeitamente
+    if (wallet.userId !== userId) {
       throw new Error('Acesso negado.');
     }
 
@@ -56,7 +57,7 @@ class WalletService {
     const wallet = await walletRepository.findById(walletId);
     
     if (!wallet) throw new Error('Carteira não encontrada.');
-    if (wallet.user_id !== userId && wallet.userId !== userId) {
+    if (wallet.userId !== userId) {
       throw new Error('Acesso negado.');
     }
 

@@ -31,14 +31,13 @@ class WalletController {
   }
 
   async update(req, res) {
-    const { id } = req.params;
+    const { id } = req.params; // id agora é UUID (String)
     const { name, color, archived } = req.body;
 
     try {
-      const wallet = await walletService.updateWallet(req.user.id, Number(id), { name, color, archived });
+      const wallet = await walletService.updateWallet(req.user.id, id, { name, color, archived });
       return res.json(wallet);
     } catch (error) {
-      // Se for erro de permissão ou não encontrado
       return res.status(400).json({ error: error.message });
     }
   }
@@ -46,8 +45,8 @@ class WalletController {
   async delete(req, res) {
     const { id } = req.params;
     try {
-      await walletService.deleteWallet(req.user.id, Number(id));
-      return res.status(204).send(); // 204 = No Content (Sucesso sem corpo)
+      await walletService.deleteWallet(req.user.id, id);
+      return res.status(204).send();
     } catch (error) {
       return res.status(400).json({ error: error.message });
     }
