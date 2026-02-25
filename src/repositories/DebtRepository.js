@@ -3,8 +3,9 @@ const db = require('../database/index');
 class DebtRepository {
 
   async findAll(walletId) {
+    // 🚀 Só buscamos dívidas NÃO deletadas
     const result = await db.query(
-      'SELECT * FROM debts WHERE wallet_id = $1 ORDER BY due_date ASC',
+      'SELECT * FROM debts WHERE wallet_id = $1 AND deleted_at IS NULL ORDER BY due_date ASC',
       [walletId]
     );
     return result.rows;
@@ -15,76 +16,58 @@ class DebtRepository {
     return result.rows[0];
   }
 
-  async create({ walletId, type, title, entityName, amount, dueDate }) {
+  async create({ id, walletId, type, title, entityName, amount, dueDate }) {
+    // 🚀 Aceita o ID do WatermelonDB (UUID)
+    const debtId = id || crypto.randomUUID();
+
     const result = await db.query(
-      `INSERT INTO debts (wallet_id, type, title, entity_name, amount, due_date)
-       VALUES ($1, $2, $3, $4, $5, $6)
+      `INSERT INTO debts (id, wallet_id, type, title, entity_name, amount, due_date, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())
        RETURNING *`,
-      [walletId, type, title, entityName, amount, dueDate]
+      [debtId, walletId, type, title, entityName, amount, dueDate]
     );
     return result.rows[0];
   }
 
-  // --- PAGAMENTO PARCIAL (CORRIGIDO: INCLUI USER_ID) ---
   async addPayment(id, paymentAmount) {
     const client = await db.connect();
     try {
       await client.query('BEGIN');
 
-      // 1. Busca a dívida
       const debtRes = await client.query('SELECT * FROM debts WHERE id = $1', [id]);
       const debt = debtRes.rows[0];
       if (!debt) throw new Error('Dívida não encontrada');
 
-      // 2. Busca user_id da carteira (NECESSÁRIO PARA A TRANSAÇÃO)
       const walletRes = await client.query('SELECT user_id FROM wallets WHERE id = $1', [debt.wallet_id]);
-      if (walletRes.rows.length === 0) throw new Error('Carteira não encontrada');
       const userId = walletRes.rows[0].user_id;
 
-      // 3. Busca Categoria Técnica (Dívida ou Empréstimo)
-      const categoryType = 'debts'; 
-      const searchName = debt.type === 'payable' ? 'Dívida' : 'Empréstimo'; 
-      
-      const catRes = await client.query(
-        "SELECT id FROM categories WHERE type = $1 AND name ILIKE $2 LIMIT 1", 
-        [categoryType, `%${searchName}%`] 
-      );
-      
-      const categoryId = catRes.rows.length > 0 ? catRes.rows[0].id : null;
-
-      // 4. Cálculos de valores
+      // Cálculo de abatimento
       const amountToPay = parseFloat(paymentAmount);
       const newTotalPaid = parseFloat(debt.total_paid || 0) + amountToPay;
-      
-      // Margem de erro flutuante (0.01)
       const isNowPaid = newTotalPaid >= (parseFloat(debt.amount) - 0.01);
 
-      // 5. Atualiza a tabela de Dívidas
+      // Atualiza Dívida
       await client.query(
         `UPDATE debts SET total_paid = $1, is_paid = $2, paid_at = $3, updated_at = NOW() WHERE id = $4`,
         [newTotalPaid, isNowPaid, isNowPaid ? new Date() : debt.paid_at, id]
       );
 
-      // 6. Atualiza o Saldo da Carteira
+      // Atualiza Carteira
       const updateBalance = debt.type === 'payable'
         ? 'UPDATE wallets SET balance = balance - $1 WHERE id = $2'
         : 'UPDATE wallets SET balance = balance + $1 WHERE id = $2';
-      
       await client.query(updateBalance, [amountToPay, debt.wallet_id]);
 
-      // 7. Cria Transação no Extrato (COM USER_ID e DEBT_ID)
-      const transactionDesc = debt.title; 
-      const transactionType = debt.type === 'payable' ? 'expense' : 'income';
-      
+      // Cria Transação Vinculada (UUID para a transação também!)
+      const transId = crypto.randomUUID();
       await client.query(
-        `INSERT INTO transactions (user_id, wallet_id, category_id, debt_id, description, amount, type, transaction_date)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())`,
-        [userId, debt.wallet_id, categoryId, debt.id, transactionDesc, amountToPay, transactionType]
+        `INSERT INTO transactions (id, user_id, wallet_id, debt_id, description, amount, type, transaction_date, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW(), NOW())`,
+        [transId, userId, debt.wallet_id, debt.id, debt.title, amountToPay, debt.type === 'payable' ? 'expense' : 'income']
       );
 
       await client.query('COMMIT');
       return { message: 'Abatimento registrado!', isNowPaid, newTotalPaid };
-
     } catch (error) {
       await client.query('ROLLBACK');
       throw error;
@@ -127,37 +110,30 @@ class DebtRepository {
     }
   }
 
-  // --- EXCLUSÃO (CORRIGIDA: Estorno também precisa de USER_ID se for criar transação de estorno) ---
-  // Nota: No seu código original de delete, você estava DELETANDO as transações ("DELETE FROM transactions...").
-  // Se deletar, não precisa de user_id. Se fosse criar transação de estorno ("Reembolso"), precisaria.
-  // Vou manter a lógica de DELETAR o histórico para limpar a sujeira, mas estornar o saldo.
-
   async delete(id) {
     const client = await db.connect();
     try {
       await client.query('BEGIN');
-
       const debtRes = await client.query('SELECT * FROM debts WHERE id = $1', [id]);
       const debt = debtRes.rows[0];
       if (!debt) throw new Error('Dívida não encontrada');
 
-      // 1. Estorno do valor pago (se houver) - Devolve o dinheiro pra carteira
+      // 1. Estorno do saldo (Soft delete não apaga o saldo, ele "anula" a dívida)
       if (debt.total_paid > 0) {
         const rollbackBalanceQuery = debt.type === 'payable'
           ? 'UPDATE wallets SET balance = balance + $1 WHERE id = $2' 
           : 'UPDATE wallets SET balance = balance - $1 WHERE id = $2'; 
-        
         await client.query(rollbackBalanceQuery, [debt.total_paid, debt.wallet_id]);
 
-        // 2. Remove transações vinculadas PELO ID (Limpa histórico)
+        // 2. Soft Delete nas transações vinculadas
         await client.query(
-          "DELETE FROM transactions WHERE debt_id = $1",
+          "UPDATE transactions SET deleted_at = NOW(), updated_at = NOW() WHERE debt_id = $1",
           [id]
         );
       }
 
-      // 3. Remove a dívida
-      await client.query('DELETE FROM debts WHERE id = $1', [id]);
+      // 3. Soft Delete na Dívida
+      await client.query('UPDATE debts SET deleted_at = NOW(), updated_at = NOW() WHERE id = $1', [id]);
 
       await client.query('COMMIT');
     } catch (error) {
