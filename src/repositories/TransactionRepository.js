@@ -7,7 +7,7 @@ class TransactionRepository {
       FROM transactions t
       LEFT JOIN categories c ON t.category_id = c.id
       JOIN wallets w ON t.wallet_id = w.id
-      WHERE w.user_id = $1
+      WHERE t.user_id = $1 AND t.deleted_at IS NULL
     `;
     
     const values = [userId];
@@ -26,7 +26,6 @@ class TransactionRepository {
     }
 
     query += ` ORDER BY t.transaction_date DESC`;
-
     const result = await db.query(query, values);
     return result.rows;
   }
@@ -37,38 +36,30 @@ class TransactionRepository {
     return result.rows[0];
   }
 
-  // CRIAR
-  // Adicionado userId (obrigatório no banco) e goalId
-  async create({ userId, walletId, categoryId, type, amount, description, transactionDate, debtId = null, goalId = null }) {
+  async create({ id, userId, walletId, categoryId, type, amount, description, transactionDate, debtId = null, goalId = null }) {
     const client = await db.connect();
     try {
       await client.query('BEGIN');
 
-      // 1. Insere (Incluindo user_id, debt_id e goal_id)
+      const transactionId = id || crypto.randomUUID(); // Usa o ID do celular ou gera um novo
+
       const insertQuery = `
-        INSERT INTO transactions (user_id, wallet_id, category_id, type, amount, description, transaction_date, debt_id, goal_id)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        INSERT INTO transactions (id, user_id, wallet_id, category_id, type, amount, description, transaction_date, debt_id, goal_id, created_at, updated_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW(), NOW())
         RETURNING *
       `;
-      const res = await client.query(insertQuery, [userId, walletId, categoryId, type, amount, description, transactionDate, debtId, goalId]);
+      const res = await client.query(insertQuery, [transactionId, userId, walletId, categoryId, type, amount, description, transactionDate, debtId, goalId]);
       const transaction = res.rows[0];
 
-      // 2. Atualiza Saldo da Carteira
+      // Atualiza Saldo da Carteira (walletId agora é String/UUID)
       const updateBalanceQuery = type === 'income'
         ? 'UPDATE wallets SET balance = balance + $1 WHERE id = $2'
         : 'UPDATE wallets SET balance = balance - $1 WHERE id = $2';
       
       await client.query(updateBalanceQuery, [amount, walletId]);
 
-      // 3. Atualiza Dívida (se houver)
-      if (debtId) {
-         await this._recalculateDebtProgress(client, debtId);
-      }
-
-      // 4. Atualiza Objetivo (se houver)
-      if (goalId) {
-         await this._recalculateGoalBalance(client, goalId);
-      }
+      if (debtId) await this._recalculateDebtProgress(client, debtId);
+      if (goalId) await this._recalculateGoalBalance(client, goalId);
 
       await client.query('COMMIT');
       return transaction;
@@ -160,12 +151,13 @@ class TransactionRepository {
     }
   }
 
-  // DELETAR
+  // DELETAR (Soft Delete)
   async delete(id) {
     const client = await db.connect();
     try {
       await client.query('BEGIN');
 
+      // Busca para estornar o saldo
       const check = await client.query('SELECT * FROM transactions WHERE id = $1', [id]);
       if (check.rows.length === 0) throw new Error('Transação não encontrada.');
       const trans = check.rows[0];
@@ -177,18 +169,11 @@ class TransactionRepository {
       
       await client.query(revertQuery, [trans.amount, trans.wallet_id]);
 
-      // 2. Deleta a transação
-      await client.query('DELETE FROM transactions WHERE id = $1', [id]);
+      // 2. Marcar como deletado (Soft Delete)
+      await client.query('UPDATE transactions SET deleted_at = NOW(), updated_at = NOW() WHERE id = $1', [id]);
 
-      // 3. Recalcula DÍVIDA
-      if (trans.debt_id) {
-          await this._recalculateDebtProgress(client, trans.debt_id);
-      }
-
-      // 4. Recalcula OBJETIVO
-      if (trans.goal_id) {
-          await this._recalculateGoalBalance(client, trans.goal_id);
-      }
+      if (trans.debt_id) await this._recalculateDebtProgress(client, trans.debt_id);
+      if (trans.goal_id) await this._recalculateGoalBalance(client, trans.goal_id);
 
       await client.query('COMMIT');
     } catch (error) {
